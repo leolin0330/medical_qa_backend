@@ -7,28 +7,46 @@
 
 
 # Web 框架與伺服器
-fastapi          # FastAPI Web 框架，建立API服務
-uvicorn          # ASGI伺服器，用於執行FastAPI應用（開發可用 uvicorn[standard] 提升效能）
+ #fastapi          # FastAPI Web 框架，建立API服務
+ #uvicorn          # ASGI伺服器，用於執行FastAPI應用（開發可用 uvicorn[standard] 提升效能）
 
 # OpenAI API 及向量資料庫
-openai           # OpenAI 官方API客戶端 (用於GPT-4、Whisper等功能)
-faiss-cpu        # FAISS 向量相似度搜尋庫（CPU版，用於語意搜尋或向量資料庫）
+ #openai           # OpenAI 官方API客戶端 (用於GPT-4、Whisper等功能)
+ #faiss-cpu        # FAISS 向量相似度搜尋庫（CPU版，用於語意搜尋或向量資料庫）
 
 # 文件解析與處理
-PyMuPDF          # 解析 PDF 檔案的套件（MuPDF的Python介面）
-pdfminer.six     # PDF 文字抽取套件（另一種PDF解析工具）
-python-docx      # 解析 Word (.docx) 文件
-python-pptx      # 解析 PowerPoint (.pptx) 檔案
-beautifulsoup4   # HTML/XML解析庫（BS4，用於解析文件內嵌的HTML或其他文字內容）
+ #PyMuPDF          # 解析 PDF 檔案的套件（MuPDF的Python介面）
+ #pdfminer.six     # PDF 文字抽取套件（另一種PDF解析工具）
+ #python-docx      # 解析 Word (.docx) 文件
+ #python-pptx      # 解析 PowerPoint (.pptx) 檔案
+ #beautifulsoup4   # HTML/XML解析庫（BS4，用於解析文件內嵌的HTML或其他文字內容）
 
 # 多媒體處理
-pydub            # 音訊處理庫，可搭配 ffmpeg 處理各種音訊格式
-moviepy          # 影片處理庫，可讀取影片音訊或截取影格（需 ffmpeg 支援）
-pillow           # 圖片處理庫 (PIL)，供 OCR 前預處理影像或轉換格式
+ #pydub            # 音訊處理庫，可搭配 ffmpeg 處理各種音訊格式
+ #moviepy          # 影片處理庫，可讀取影片音訊或截取影格（需 ffmpeg 支援）
+ #pillow           # 圖片處理庫 (PIL)，供 OCR 前預處理影像或轉換格式
 
 # OCR 文字識別
-pytesseract      # Tesseract OCR 的 Python 封裝，用於圖像文字識別（需系統安裝 tesseract）
+ #pytesseract      # Tesseract OCR 的 Python 封裝，用於圖像文字識別（需系統安裝 tesseract）
 
 # 檔案上傳與HTTP請求
-python-multipart # 處理HTTP表單/檔案上傳（FastAPI 上傳檔案需要）
-requests         # HTTP請求庫（openai 套件使用，亦可自行調用 API）
+ #python-multipart # 處理HTTP表單/檔案上傳（FastAPI 上傳檔案需要）
+ #requests         # HTTP請求庫（openai 套件使用，亦可自行調用 API）
+
+fastapi
+uvicorn[standard]
+python-multipart
+openai
+faiss-cpu
+PyMuPDF
+pdfminer.six
+python-docx
+python-pptx
+moviepy
+pydub
+pillow
+pytesseract
+numpy==1.26.4
+imageio-ffmpeg
+beautifulsoup4
+

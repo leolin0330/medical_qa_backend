@@ -1,0 +1,19 @@
+# === Python 暫存與編譯 ===
+__pycache__/
+*.py[cod]
+*.log
+
+# === 本地虛擬環境 ===
+.venv/
+
+# === 機密 ===
+.env
+
+# === 測試檔案與輸出 ===
+data/uploads/
+data/index/
+data/collections/
+
+# === IDE ===
+.vscode/
+.idea/

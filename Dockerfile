@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
+ENV PYTHONPATH=/app
+
 # 4) 安裝 Python 套件（先複製 requirements.txt 利用快取）
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -20,4 +22,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 6) 用 Cloud Run 的 $PORT（預設 8080）
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8080} --log-level info"]

@@ -15,7 +15,7 @@ from services import text_extractor
 # .\.venv\Scripts\Activate.ps1              # （備忘）啟動虛擬環境的 PowerShell 指令
 # python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000   # （備忘）啟動開發伺服器
 # http://127.0.0.1:8000/docs               # （備忘）Swagger UI 文件入口 不聽聲音的話，可以知道這影片在教導甚麼嗎
-#  deactivate
+#  deactivate 
 
 
 app = FastAPI(                             # 建立 FastAPI 應用實例

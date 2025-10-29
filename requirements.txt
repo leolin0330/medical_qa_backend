@@ -1,4 +1,4 @@
-# fastapi==0.115.0
+﻿# fastapi==0.115.0
 # uvicorn[standard]==0.30.6
 # python-dotenv==1.0.1
 # openai>=1.40.0
@@ -6,33 +6,23 @@
 # PyMuPDF==1.24.10
 
 
-# Web 框架與伺服器
- #fastapi          # FastAPI Web 框架，建立API服務
- #uvicorn          # ASGI伺服器，用於執行FastAPI應用（開發可用 uvicorn[standard] 提升效能）
+# Web 獢?撩?
+ #fastapi          # FastAPI Web 獢嚗遣蝡PI??
+ #uvicorn          # ASGI隡箸??剁??冽?瑁?FastAPI?嚗??澆??uvicorn[standard] ???嚗?
+# OpenAI API ?????澈
+ #openai           # OpenAI 摰API摰Ｘ蝡?(?冽GPT-4?hisper蝑???
+ #faiss-cpu        # FAISS ???訾撮摨行?撠澈嚗PU???冽隤????????澈嚗?
+# ?辣閫?????? #PyMuPDF          # 閫?? PDF 瑼???隞塚?MuPDF?ython隞嚗? #pdfminer.six     # PDF ???賢?憟辣嚗銝蝔娑DF閫??撌亙嚗? #python-docx      # 閫?? Word (.docx) ?辣
+ #python-pptx      # 閫?? PowerPoint (.pptx) 瑼?
+ #beautifulsoup4   # HTML/XML閫??摨恬?BS4嚗?潸圾??隞嗅撋?HTML?隞?摮摰對?
 
-# OpenAI API 及向量資料庫
- #openai           # OpenAI 官方API客戶端 (用於GPT-4、Whisper等功能)
- #faiss-cpu        # FAISS 向量相似度搜尋庫（CPU版，用於語意搜尋或向量資料庫）
-
-# 文件解析與處理
- #PyMuPDF          # 解析 PDF 檔案的套件（MuPDF的Python介面）
- #pdfminer.six     # PDF 文字抽取套件（另一種PDF解析工具）
- #python-docx      # 解析 Word (.docx) 文件
- #python-pptx      # 解析 PowerPoint (.pptx) 檔案
- #beautifulsoup4   # HTML/XML解析庫（BS4，用於解析文件內嵌的HTML或其他文字內容）
-
-# 多媒體處理
- #pydub            # 音訊處理庫，可搭配 ffmpeg 處理各種音訊格式
- #moviepy          # 影片處理庫，可讀取影片音訊或截取影格（需 ffmpeg 支援）
- #pillow           # 圖片處理庫 (PIL)，供 OCR 前預處理影像或轉換格式
-
-# OCR 文字識別
- #pytesseract      # Tesseract OCR 的 Python 封裝，用於圖像文字識別（需系統安裝 tesseract）
-
-# 檔案上傳與HTTP請求
- #python-multipart # 處理HTTP表單/檔案上傳（FastAPI 上傳檔案需要）
- #requests         # HTTP請求庫（openai 套件使用，亦可自行調用 API）
-
+# 憭?擃??? #pydub            # ?唾???摨恬??舀??ffmpeg ???車?唾??澆?
+ #moviepy          # 敶梁???摨恬??航??蔣?閮??芸?敶望嚗? ffmpeg ?舀嚗? #pillow           # ????摨?(PIL)嚗? OCR ????敶勗????撘?
+# OCR ??霅
+ #pytesseract      # Tesseract OCR ??Python 撠?嚗?澆???摮??伐??蝟餌絞摰? tesseract嚗?
+# 瑼?銝?TTP隢?
+ #python-multipart # ??HTTP銵典/瑼?銝嚗astAPI 銝瑼??閬?
+ #requests         # HTTP隢?摨恬?openai 憟辣雿輻嚗漲?航銵矽??API嚗?
 fastapi
 uvicorn[standard]
 python-multipart
@@ -49,4 +39,5 @@ pytesseract
 numpy==1.26.4
 imageio-ffmpeg
 beautifulsoup4
+
 

@@ -98,16 +98,22 @@ def _has_collection_data(cid: str) -> bool:
     except Exception:
         return False
 
-def embed_paragraphs(paragraph_texts: List[str]) -> List[List[float]]:
-    """回傳段落向量；（索引建立流程使用）。"""
-    if not paragraph_texts:
-        return []
-    resp = client.embeddings.create(model=EMBED_MODEL, input=paragraph_texts)
-    # 可選：若想記錄嵌入成本就在這裡讀 usage
-    # _, _, emb_tt = _tokens(getattr(resp, "usage", None))
-    # emb_cost = emb_tt * PRICES[EMBED_MODEL]["in"]
-    # print(f"[Embed] tokens={emb_tt} cost=${emb_cost:.6f}")
-    return [item.embedding for item in resp.data]
+def embed_paragraphs(paragraph_texts: list[str]) -> list[list[float]]:
+    all_vectors = []
+    batch, batch_tokens = [], 0
+    for txt in paragraph_texts:
+        t = len(txt) // 3.5  # 粗估 token
+        if batch_tokens + t > 7000:
+            resp = client.embeddings.create(model=EMBED_MODEL, input=batch)
+            all_vectors.extend([d.embedding for d in resp.data])
+            batch, batch_tokens = [], 0
+        batch.append(txt)
+        batch_tokens += t
+    if batch:
+        resp = client.embeddings.create(model=EMBED_MODEL, input=batch)
+        all_vectors.extend([d.embedding for d in resp.data])
+    return all_vectors
+
 
 def _answer_general(query: str) -> Tuple[str, Dict]:
     """一般知識回答 + 成本"""

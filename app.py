@@ -8,9 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware                  # CORS 中�
 from services import pdf_utils, vector_store, qna                   # 專案內部服務：PDF 解析、向量索引、問答邏輯
 from routers.knowledge import router as knowledge_router            # 匯入自訂的 knowledge 路由（子路由）
 from services import text_extractor
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse
 
 # 初始化向量庫（會自動載入已有的 index 和 metadata）
-# vector_store.init_index(1536)  # OpenAI ada-002 向量長度
+# vector_store.init_index(1536)  # OpenAI ada-002 向量長度 dotenv
 
 # .\.venv\Scripts\Activate.ps1              # （備忘）啟動虛擬環境的 PowerShell 指令
 # python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000   # （備忘）啟動開發伺服器
@@ -45,6 +48,51 @@ app.add_middleware(                        # 加入 CORS 中介層，允許跨�
     allow_methods=["*"],                   # 允許的 HTTP 方法（GET/POST/…）
     allow_headers=["*"],                   # 允許的自訂標頭
 )
+
+# 處理網址
+def _extract_text_from_url(url: str, timeout: int = 12) -> str:
+    """下載 HTML，移除 script/style，回傳乾淨文字。"""
+    # 基本網址驗證（避免奇怪 scheme）
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="只支援 http/https 網址")
+
+    try:
+        # 下載
+        resp = requests.get(url, timeout=timeout, headers={
+            "User-Agent": "Mozilla/5.0 (Medical-QA/1.0)"
+        })
+    except requests.RequestException as e:
+        raise HTTPException(status_code=400, detail=f"連線失敗：{e}")
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"無法讀取網址（HTTP {resp.status_code}）")
+
+    # 若是 PDF/檔案，建議你導回 /upload 流程
+    ctype = (resp.headers.get("Content-Type") or "").lower()
+    if "pdf" in ctype or "octet-stream" in ctype:
+        raise HTTPException(status_code=415, detail="偵測到非 HTML 檔案，請改用 /upload 上傳檔案。")
+
+    # 粗略大小限制（避免超大頁面）
+    if len(resp.content) > 2 * 1024 * 1024:  # 2MB
+        raise HTTPException(status_code=413, detail="頁面過大（>2MB），請改上傳檔案或提供摘要。")
+
+    # 解析 HTML → 純文字
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.extract()
+    text = soup.get_text(separator="\n", strip=True)
+
+    # 簡單清理
+    lines = [ln.strip() for ln in text.splitlines()]
+    text = "\n".join([ln for ln in lines if ln])
+
+    if len(text) < 100:
+        raise HTTPException(status_code=400, detail="頁面文字過少或非文章頁，無法分析。")
+
+    return text
+
+
 
 # === cost tracking: imports & config ===
 import os, json, subprocess
@@ -85,43 +133,6 @@ def get_media_duration_sec(path: str) -> float:
         return 0.0
 # === end cost tracking ===
 
-
-"""
-@app.post("/upload", summary="上傳醫學PDF文件")  # 定義 POST /upload 端點，摘要顯示於 /docs
-async def upload_pdf(file: UploadFile = File(...)):  # 參數 file：表單檔案欄位（必填）；UploadFile 可流式讀取
-    try:                                # 例外處理區塊開始
-        if file.content_type not in ("application/pdf", "application/octet-stream"):  # 檢查 MIME 類型
-            raise HTTPException(status_code=400, detail="請上傳 PDF 檔案")  # 非 PDF 則回 400 Bad Request
-
-        upload_dir = "data/uploads"         # 設定檔案儲存資料夾（相對路徑）
-        os.makedirs(upload_dir, exist_ok=True)  # 若不存在則建立資料夾（多層可同時建立）
-        file_path = os.path.join(upload_dir, file.filename)  # 目標儲存的完整路徑
-
-        contents = await file.read()        # 非同步一次性讀取上傳內容（小檔案可；大檔建議分段）
-        with open(file_path, "wb") as f:    # 以二進位寫入模式打開目標檔案
-            f.write(contents)               # 將上傳內容寫入磁碟
-        await file.close()                  # 關閉上傳檔案的資源（UploadFile）
-
-        pages_text = pdf_utils.extract_text_by_page(file_path)  # 呼叫服務：逐頁擷取 PDF 文字，回傳 list[str]
-        paragraphs = pdf_utils.split_into_paragraphs(pages_text)  # 呼叫服務：按規則分段（回傳含 page/text 的列表）
-        if not paragraphs:                  # 若分段結果為空，視為解析失敗
-            raise HTTPException(status_code=500, detail="PDF 內容為空或解析失敗")  # 回 500，提示前端
-
-        vectors = qna.embed_paragraphs([p["text"] for p in paragraphs])  # 將每個段落送 Embedding 取得向量
-        vector_store.add_embeddings(vectors, paragraphs)  # 將向量與段落一起加入向量索引（FAISS 等）
-
-        return {                             # 成功回應：回傳檔名與索引段落數
-            "message": f"已上傳並索引：{file.filename}",
-            "paragraphs_indexed": len(paragraphs)
-        }
-
-    except HTTPException:                    # 若是我們主動丟出的 HTTPException，原封不動往外拋
-        raise
-    except Exception:                        # 其他未預期錯誤
-        # 開發期：把完整堆疊回傳，方便你在 Swagger 直接看到哪一行壞了
-        detail = traceback.format_exc()      # 將完整例外堆疊轉成字串
-        raise HTTPException(status_code=500, detail=detail)  # 回 500 並附上堆疊（正式環境可改為隱藏）
-"""
 # app.py（只貼出需要修改/新增的重點）
 from pathlib import Path
 from services import pdf_utils, vector_store, qna
@@ -129,6 +140,124 @@ from services import text_extractor  # ★ 新增
 
 from fastapi import Request, Query
 from typing import List, Optional
+
+
+@app.post("/fetch_url", summary="讀取網址內容並進行問答（不持久保存）")
+async def fetch_url(
+    url: str = Form(...),
+    query: str = Form("請用上面網址內容條列重點並進行摘要"),
+    top_k: int = Form(5),
+    mode: str = Form("auto"),
+):
+    """
+    讀取指定 URL → 擷取文字 → 臨時建立向量集合 → 問答 → 立即清空集合。
+    不會長期保存內容。
+    """
+    try:
+        # 1) 取文
+        fulltext = _extract_text_from_url(url)
+
+        # === 切段與清理 ===
+        def approx_tokens(s: str) -> int:
+            return max(1, int(len(s) / 3.5))  # 粗估 tokens 數
+
+        def chunk_text(text: str, max_tokens_per_chunk: int = 400):
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            chunks, cur, cur_tok = [], [], 0
+            for ln in lines:
+                t = approx_tokens(ln)
+                if cur_tok + t > max_tokens_per_chunk and cur:
+                    chunks.append("\n".join(cur))
+                    cur, cur_tok = [], 0
+                cur.append(ln)
+                cur_tok += t
+            if cur:
+                chunks.append("\n".join(cur))
+            return chunks
+
+        import re
+        def light_clean(s: str) -> str:
+            s = re.sub(r'\n{2,}', '\n', s)
+            s = re.sub(r'(cookie|accept|privacy).{0,40}', '', s, flags=re.I)
+            s = re.sub(r'(terms|subscribe|sign in|login).{0,40}', '', s, flags=re.I)
+            return s
+
+        cleaned = light_clean(fulltext)
+        segments = chunk_text(cleaned, max_tokens_per_chunk=400)
+
+        # === 取得全部分段 ===
+        selected = segments
+
+        # 加一個「極限上限」避免惡意超長頁耗死記憶體，例如 50k tokens：
+        HARD_MAX_TOKENS = 50000
+        total_toks = sum(max(1, int(len(s)/3.5)) for s in selected)
+        if total_toks > HARD_MAX_TOKENS:
+            # 保守只取前面到 50k tokens 為止
+            kept, acc = [], 0
+            for s in selected:
+                t = max(1, int(len(s)/3.5))
+                if acc + t > HARD_MAX_TOKENS:
+                    break
+                kept.append(s)
+                acc += t
+            selected = kept
+
+        paragraphs = [{"page": 1, "text": s, "source": url} for s in selected]
+
+        # === 向量化 ===
+        vectors = qna.embed_paragraphs([p["text"] for p in paragraphs])
+        if not vectors:
+            raise HTTPException(status_code=500, detail="向量產生失敗")
+        dim = len(vectors[0])
+
+        # === 臨時 collection ===
+        import hashlib
+        cid = "_url_" + hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
+        vector_store.reset_collection(cid, dim)
+
+        for p in paragraphs:
+            p.setdefault("source", url)
+        vector_store.add_embeddings(cid, vectors, paragraphs)
+
+        # === 問答 ===
+        answer, mode_used, meta = qna.answer_question(
+            query=query,
+            top_k=top_k,
+            mode=mode,
+            sources=None,
+            collection_id=cid,
+        )
+
+        # === 清空臨時集合 ===
+        try:
+            vector_store.reset_collection(cid, dim)
+        except Exception:
+            pass
+
+        # === 回傳結果 ===
+        return {
+            "ok": True,
+            "url": url,
+            "question": query,
+            "answer": answer,
+            "mode": mode_used,
+            "usage": meta.get("usage", {}),
+            "sources": meta.get("sources", []),
+            "cost_usd": round(meta.get("total_cost_usd", 0.0), 6),
+            "embedding_cost": round(meta.get("embedding_cost", 0.0), 6),
+            "chat_cost": round(meta.get("chat_cost", 0.0), 6),
+            "transcribe_cost": round(meta.get("transcribe_cost", 0.0), 6),
+        }
+
+    except HTTPException:
+        raise
+    except Exception:
+        import traceback
+        detail = traceback.format_exc()
+        raise HTTPException(status_code=500, detail=detail)
+
+
+
 
 @app.post("/upload", summary="上傳文件")
 async def upload_pdf(

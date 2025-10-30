@@ -11,6 +11,8 @@ from services import text_extractor
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+import re
+
 
 # 初始化向量庫（會自動載入已有的 index 和 metadata）
 # vector_store.init_index(1536)  # OpenAI ada-002 向量長度 dotenv
@@ -393,59 +395,55 @@ async def upload_pdf(
 async def ask_question(
     query: str = Form(...),
     top_k: int = Form(5),
-    mode: str = Form("auto"),
-    source: Optional[List[str]] = Query(None),
-    collectionId: str = Form(None),   # ★ 新增：指定要查詢的 collection
+    mode: str = Form("auto"),                         # 'auto' | 'doc' | 'general'
+    source: Optional[List[str]] = Query(None),        # 來源清單（query string）
+    collectionId: Optional[str] = Form(None),         # 指定要查詢的 collection
 ):
     """
-    回傳問答結果 + 成本細項：
-      - cost_usd: 總花費
-      - embedding_cost: 上傳嵌入費用
-      - chat_cost: 問答生成費用
-      - transcribe_cost: 影音轉錄費
+    回傳問答結果 + 成本細項
     """
-    try:
-        # === 驗證 / 正規化 collectionId ===
-        def _norm_collection_id(cid: str | None) -> str:
-            cid = (cid or "_default").strip()
-            import re
-            if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", cid):
-                raise HTTPException(status_code=400, detail="非法的 collectionId")
-            return cid
 
-        cid = _norm_collection_id(collectionId)
+    # 1) 正規化 collectionId：沒有就保持 None（不要自動設成 '_default'）
+    def _norm_collection_id(cid: Optional[str]) -> Optional[str]:
+        if cid is None or cid.strip() == "":
+            return None
+        cid = cid.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_\\-]{1,64}", cid):
+            raise HTTPException(status_code=400, detail="非法的 collectionId")
+        return cid
 
-        # === 呼叫 QnA 模組（傳入 collectionId） ===
-        answer, mode_used, meta = qna.answer_question(
-            query=query,
-            top_k=top_k,
-            mode=mode,
-            sources=source,
-            collection_id=cid,   # ★ 傳進 qna.py
-        )
+    cid = _norm_collection_id(collectionId)
 
-        # === 整理回傳 ===
-        return {
-            "ok": True,
-            "collectionId": cid,  # ★ 回傳目前查詢的 collection
-            "question": query,
-            "answer": answer,
-            "mode": mode_used,
-            "cost_usd": round(meta.get("total_cost_usd", 0.0), 6),
-            "embedding_cost": round(meta.get("embedding_cost", 0.0), 6),
-            "chat_cost": round(meta.get("chat_cost", 0.0), 6),
-            "transcribe_cost": round(meta.get("transcribe_cost", 0.0), 6),
-            "usage": meta.get("usage", {}),
-            "sources": meta.get("sources", []),
-        }
+    # 2) 正規化 sources：空/未提供都當作 None
+    sources = [s for s in (source or []) if s] or None
 
-    except HTTPException:
-        raise
-    except Exception:
-        import traceback
-        detail = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=detail)
+    # 3) 僅文件模式需要來源；沒有就直接擋下
+    if mode == "doc" and not (sources or cid):
+        raise HTTPException(status_code=400, detail="僅文件模式需要提供來源（source 或 collectionId）")
 
+    # 4) 呼叫 QnA（qna 端要遵守：沒有來源時不要檢索；auto 有信心門檻）
+    answer, mode_used, meta = qna.answer_question(
+        query=query,
+        top_k=top_k,
+        mode=mode,
+        sources=sources,            # 可能是 None
+        collection_id=cid,          # 可能是 None
+    )
+
+    # 5) 統一回傳（保留你原本欄位）
+    return {
+        "ok": True,
+        "collectionId": cid or meta.get("collection_id"),
+        "question": query,
+        "answer": answer,
+        "mode": mode_used,                                     # 實際使用的模式
+        "cost_usd": round(meta.get("total_cost_usd", 0.0), 6),
+        "embedding_cost": round(meta.get("embedding_cost", 0.0), 6),
+        "chat_cost": round(meta.get("chat_cost", 0.0), 6),
+        "transcribe_cost": round(meta.get("transcribe_cost", 0.0), 6),
+        "usage": meta.get("usage", {}),
+        "sources": meta.get("sources", []) or (sources or []), # 方便你前端/Network 檢查
+    }
 
 
 

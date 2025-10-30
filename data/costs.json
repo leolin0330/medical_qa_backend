@@ -1,6 +1,6 @@
 {
   "_default": {
-    "pending_transcribe_cost": 0.0
+    "pending_transcribe_cost": 0.001002
   },
   "string": {
     "pending_transcribe_cost": 0.0

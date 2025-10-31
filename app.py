@@ -298,15 +298,6 @@ async def upload_pdf(
             f.write(contents)
         await file.close()
 
-        # # === 5) 文字/影音抽取（統一 extract_any） ===
-        # fulltext, vision_cost = text_extractor.extract_any(file_path)
-
-        # # === 6) 切段 ===
-        # paragraphs = pdf_utils.split_into_paragraphs(fulltext)
-        # if not paragraphs:
-        #     raise HTTPException(status_code=500, detail="文件內容為空或解析失敗")
-
-                # === 5) 文字/影音抽取（統一 extract_any） ===
         fulltext, vision_cost = text_extractor.extract_any(file_path)
 
         # === 6) 切段（改為包裝成頁面形式） ===
@@ -327,7 +318,10 @@ async def upload_pdf(
 
         # === 8) collectionId 驗證與索引重建 ===
         def _norm_collection_id(cid: str | None) -> str:
-            cid = (cid or "_default").strip()
+            INVALID_VALUES = {"", "string", "null", "undefined", "none"}
+            if cid is None or cid.strip().lower() in INVALID_VALUES:
+                return "_default"
+            cid = cid.strip()
             import re
             if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", cid):
                 raise HTTPException(status_code=400, detail="非法的 collectionId")

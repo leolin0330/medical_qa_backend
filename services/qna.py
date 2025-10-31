@@ -146,138 +146,11 @@ def _answer_general(query: str) -> Tuple[str, Dict]:
 from typing import Optional, List
 from typing import Optional, List, Tuple, Dict
 
-# def answer_question(
-#     query: str,
-#     top_k: int = 5,
-#     mode: str = "auto",
-#     sources: Optional[List[str]] = None,
-#     collection_id: str = "_default",   # ✅ 接收 app.py 傳進來的 collectionId
-# ) -> Tuple[str, str, Dict]:
-#     """
-#     回傳: (answer, mode_used, meta)
-#       - mode_used: "general" | "doc"
-#     """
-#     mode = (mode or "auto").lower()
-
-#     # 1) 強制一般知識
-#     if mode == "general":
-#         ans, meta = _answer_general(query)
-#         return ans, "general", meta
-
-#     # 2) 檢查指定 collection 是否已有索引資料
-#     if not _has_collection_data(collection_id):   # ✅ 改用新的檢查
-#         ans, meta = _answer_general(query)
-#         return ans, "general", meta
-
-#     # 3) 查詢向量 & 嵌入成本（僅對 query 計算）
-#     q_embed = client.embeddings.create(model=EMBED_MODEL, input=[query])
-#     q_vec = q_embed.data[0].embedding
-#     _, _, emb_tt = _tokens(getattr(q_embed, "usage", None))
-#     emb_cost = emb_tt * PRICES[EMBED_MODEL]["in"]
-
-#     # 4) 相似段落檢索（在「指定的」collection 中）
-#     top_paras = search_similar_in_collection(collection_id, q_vec, top_k=top_k, sources=sources)  # ✅ 用傳入的 collection_id
-#     if not top_paras:
-#         ans, meta = _answer_general(query)
-#         meta["embedding_cost"] = emb_cost
-#         meta["total_cost_usd"] = meta.get("total_cost_usd", 0.0) + emb_cost
-#         return ans, "general", meta
-
-#     # 5) 組上下文（過短則切回一般知識）
-#     ctx_lines, total_chars = [], 0
-#     for p in top_paras:
-#         t = (p.get("text") or "")
-#         if len(t) > 1200:
-#             t = t[:1200] + "..."
-#         total_chars += len(t)
-#         ctx_lines.append(f"第{p.get('page','?')}頁：{t}")
-
-#     if mode == "auto" and total_chars < 200:
-#         ans, meta = _answer_general(query)
-#         meta["embedding_cost"] = emb_cost
-#         meta["total_cost_usd"] = meta.get("total_cost_usd", 0.0) + emb_cost
-#         return ans, "general", meta
-
-#     ctx = "\n\n".join(ctx_lines)
-#     prompt = (
-#         "你是一位嚴謹的中文醫學AI助手。根據提供的文件內容回答問題，"
-#         "務必以條列式說明，並在每一點最後以 (第X頁) 標註引用頁碼。"
-#         "若文件不足以支持答案，請明確說明。\n\n"
-#         f"【可用文件內容】\n{ctx}\n\n【使用者問題】{query}\n\n請開始回答："
-#     )
-
-#     # 6) Chat 回答 & 成本
-#     chat = client.chat.completions.create(
-#         model=CHAT_MODEL,
-#         messages=[
-#             {"role": "system", "content": "你是專業且謹慎的醫學知識助手，回答時務必標註引用頁碼。"},
-#             {"role": "user", "content": prompt},
-#         ],
-#         temperature=0,
-#     )
-
-#     pt, ct, tt = _tokens(getattr(chat, "usage", None))
-#     chat_cost = round(pt * PRICES[CHAT_MODEL]["in"] + ct * PRICES[CHAT_MODEL]["out"], 6)
-
-#     # ✅ 將該 collection 的暫存轉錄費結清（而不是 None）
-#     trans_cost = pop_pending_transcribe_cost(collection_id)
-
-#     total_cost = round(emb_cost + chat_cost, 6)
-
-#     # sources_meta = []
-#     # for p in top_paras:
-#     #     src = p.get("source")
-#     #     if src:
-#     #         sources_meta.append({
-#     #             "text": p.get("text", "")[:100],
-#     #             "source": src,
-#     #             "time": p.get("time"),
-#     #         })
-
-#     sources_meta = []
-#     for p in top_paras:
-#         src = p.get("source")
-#         if not src:
-#             continue
-#         snippet = (p.get("text") or "").replace("\n", " ")
-#         sources_meta.append({
-#             # 兩個鍵都給，前端不管讀 text 還是 snippet 都有
-#             "snippet": snippet[:160],
-#             "text":    snippet[:160],
-
-#             "source": src,
-#             "time":   p.get("time"),
-
-#             # ✅ 新增：頁碼與相似度
-#             "page":   p.get("page"),
-#             "score":  (float(p["score"]) if p.get("score") is not None else None),
-#         })
-
-
-#     meta = {
-#         "usage": {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": tt},
-#         "embedding_cost": emb_cost,
-#         "chat_cost": chat_cost,
-#         "transcribe_cost": trans_cost,
-#         "total_cost_usd": total_cost + trans_cost,
-#         "sources": sources_meta,
-#     }
-
-#     # answer_text = chat.choices[0].message.content.strip()
-#     # return answer_text, "doc", meta
-
-
-#     # 清理 AI 生成內容裡的假頁碼（第1頁）
-#     PAGE_HINT_RE = re.compile(r'[（(]\s*第\s*\d+\s*頁\s*[)）]')
-
-#     answer_text = chat.choices[0].message.content.strip()
-#     answer_text = PAGE_HINT_RE.sub('', answer_text)  # 移除頁碼標註
-#     return answer_text, "doc", meta
 
 def answer_question(
     query: str,
+    mode: str ,
     top_k: int = 5,
-    mode: str = "auto",
     sources: Optional[List[str]] = None,
     collection_id: Optional[str] = None,  # ← 改成可為 None，不要給預設 "_default"
 ) -> Tuple[str, str, Dict]:
@@ -285,7 +158,7 @@ def answer_question(
     回傳: (answer, mode_used, meta)
       - mode_used: "general" | "doc"
     """
-    mode = (mode or "auto").lower()
+    mode = mode.lower()
     CONF_THRESHOLD = 0.25  # 檢索信心門檻（可調 0.2~0.35）
 
     # ---- 共用的小函式 ----
@@ -354,13 +227,13 @@ def answer_question(
 
     # 6) 自動模式門檻：無檢索結果或分數過低 → 轉一般知識
     top_score = float(top_paras[0].get("score", 0.0)) if top_paras else 0.0
-    if mode == "auto" and (not top_paras or top_score < CONF_THRESHOLD):
-        ans, meta = _answer_general(query)
-        # 把剛才已經花掉的 embedding 成本加回去
-        meta["embedding_cost"] = meta.get("embedding_cost", 0.0) + emb_cost
-        meta["total_cost_usd"] = meta.get("total_cost_usd", 0.0) + emb_cost
-        meta.setdefault("transcribe_cost", 0.0)
-        return ans, "general", meta
+    # if mode == "auto" and (not top_paras or top_score < CONF_THRESHOLD):
+    #     ans, meta = _answer_general(query)
+    #     # 把剛才已經花掉的 embedding 成本加回去
+    #     meta["embedding_cost"] = meta.get("embedding_cost", 0.0) + emb_cost
+    #     meta["total_cost_usd"] = meta.get("total_cost_usd", 0.0) + emb_cost
+    #     meta.setdefault("transcribe_cost", 0.0)
+    #     return ans, "general", meta
 
     # 7) 組上下文（檢查太短情況；auto 可再保險一次）
     ctx_lines, total_chars = [], 0
@@ -372,12 +245,12 @@ def answer_question(
         page = p.get("page", "?")
         ctx_lines.append(f"第{page}頁：{t}")
 
-    if mode == "auto" and total_chars < 200:
-        ans, meta = _answer_general(query)
-        meta["embedding_cost"] = meta.get("embedding_cost", 0.0) + emb_cost
-        meta["total_cost_usd"] = meta.get("total_cost_usd", 0.0) + emb_cost
-        meta.setdefault("transcribe_cost", 0.0)
-        return ans, "general", meta
+    # if mode == "auto" and total_chars < 200:
+    #     ans, meta = _answer_general(query)
+    #     meta["embedding_cost"] = meta.get("embedding_cost", 0.0) + emb_cost
+    #     meta["total_cost_usd"] = meta.get("total_cost_usd", 0.0) + emb_cost
+    #     meta.setdefault("transcribe_cost", 0.0)
+    #     return ans, "general", meta
 
     ctx = "\n\n".join(ctx_lines)
 

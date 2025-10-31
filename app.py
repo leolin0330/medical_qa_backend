@@ -19,7 +19,7 @@ import re
 
 # .\.venv\Scripts\Activate.ps1              # （備忘）啟動虛擬環境的 PowerShell 指令
 # python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000   # （備忘）啟動開發伺服器
-# http://127.0.0.1:8000/docs               # （備忘）Swagger UI 文件入口 不聽聲音的話，可以知道這影片在教導甚麼嗎
+# http://127.0.0.1:8000/docs               # （備忘）Swagger UI 文件入口 
 #  deactivate 
 
 
@@ -149,7 +149,6 @@ async def fetch_url(
     url: str = Form(...),
     query: str = Form("請用上面網址內容條列重點並進行摘要"),
     top_k: int = Form(5),
-    mode: str = Form("auto"),
 ):
     """
     讀取指定 URL → 擷取文字 → 臨時建立向量集合 → 問答 → 立即清空集合。
@@ -225,7 +224,7 @@ async def fetch_url(
         answer, mode_used, meta = qna.answer_question(
             query=query,
             top_k=top_k,
-            mode=mode,
+            mode="doc", # 因為 URL 有提供文字，視為有文件
             sources=None,
             collection_id=cid,
         )
@@ -395,7 +394,6 @@ async def upload_pdf(
 async def ask_question(
     query: str = Form(...),
     top_k: int = Form(5),
-    mode: str = Form("auto"),                         # 'auto' | 'doc' | 'general'
     source: Optional[List[str]] = Query(None),        # 來源清單（query string）
     collectionId: Optional[str] = Form(None),         # 指定要查詢的 collection
 ):
@@ -405,7 +403,8 @@ async def ask_question(
 
     # 1) 正規化 collectionId：沒有就保持 None（不要自動設成 '_default'）
     def _norm_collection_id(cid: Optional[str]) -> Optional[str]:
-        if cid is None or cid.strip() == "":
+        INVALID_VALUES = {"", "string", "null", "undefined", "none"}
+        if cid is None or cid.strip().lower() in INVALID_VALUES:
             return None
         cid = cid.strip()
         if not re.fullmatch(r"[A-Za-z0-9_\\-]{1,64}", cid):
@@ -417,17 +416,15 @@ async def ask_question(
     # 2) 正規化 sources：空/未提供都當作 None
     sources = [s for s in (source or []) if s] or None
 
-    # 3) 僅文件模式需要來源；沒有就直接擋下
-    if mode == "doc" and not (sources or cid):
-        raise HTTPException(status_code=400, detail="僅文件模式需要提供來源（source 或 collectionId）")
+    # 3)改為自動依據是否有文件來回答
+    has_sources = bool(sources or cid)
 
-    # 4) 呼叫 QnA（qna 端要遵守：沒有來源時不要檢索；auto 有信心門檻）
     answer, mode_used, meta = qna.answer_question(
         query=query,
         top_k=top_k,
-        mode=mode,
-        sources=sources,            # 可能是 None
-        collection_id=cid,          # 可能是 None
+        mode="doc" if has_sources else "general",  # 自動決定
+        sources=sources,
+        collection_id=cid,
     )
 
     # 5) 統一回傳（保留你原本欄位）

@@ -5,6 +5,7 @@ import os                                  # 作業系統相關（路徑、環�
 import traceback                           # 取得完整例外堆疊字串，方便在開發時回傳詳細錯誤
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form  # FastAPI 主體與請求/例外/表單工具
 from fastapi.middleware.cors import CORSMiddleware                  # CORS 中介層，讓前端（不同網域）可呼叫 API
+from services import text_extractor  # ★ 新增
 from services import pdf_utils, vector_store, qna                   # 專案內部服務：PDF 解析、向量索引、問答邏輯
 from routers.knowledge import router as knowledge_router            # 匯入自訂的 knowledge 路由（子路由）
 from services import text_extractor
@@ -12,6 +13,8 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 import re
+
+
 
 
 # 初始化向量庫（會自動載入已有的 index 和 metadata）
@@ -51,6 +54,9 @@ app.add_middleware(                        # 加入 CORS 中介層，允許跨�
     allow_headers=["*"],                   # 允許的自訂標頭
 )
 
+# 偵測網址
+URL_RE = re.compile(r"^https?://", re.I)
+
 # 處理網址
 def _extract_text_from_url(url: str, timeout: int = 12) -> str:
     """下載 HTML，移除 script/style，回傳乾淨文字。"""
@@ -72,8 +78,14 @@ def _extract_text_from_url(url: str, timeout: int = 12) -> str:
 
     # 若是 PDF/檔案，建議你導回 /upload 流程
     ctype = (resp.headers.get("Content-Type") or "").lower()
-    if "pdf" in ctype or "octet-stream" in ctype:
-        raise HTTPException(status_code=415, detail="偵測到非 HTML 檔案，請改用 /upload 上傳檔案。")
+    # if "pdf" in ctype or "octet-stream" in ctype:
+    #     raise HTTPException(status_code=415, detail="偵測到非 HTML 檔案，請改用 /upload 上傳檔案。")
+    # 只允許純文字型內容，其餘都拒絕
+    if not any(t in ctype for t in ["text/html", "text/plain", "application/xhtml"]):
+        raise HTTPException(
+            status_code=415,
+            detail=f"目前僅支援一般網頁文字，偵測到 Content-Type={ctype}，請改用 /upload 上傳檔案。"
+        )
 
     # 粗略大小限制（避免超大頁面）
     if len(resp.content) > 2 * 1024 * 1024:  # 2MB
@@ -137,11 +149,96 @@ def get_media_duration_sec(path: str) -> float:
 
 # app.py（只貼出需要修改/新增的重點）
 from pathlib import Path
-from services import pdf_utils, vector_store, qna
-from services import text_extractor  # ★ 新增
-
 from fastapi import Request, Query
 from typing import List, Optional
+
+
+async def _answer_from_url(url: str, top_k: int = 5, summary_query: str | None = None):
+    """
+    讀取 URL → 取正文 → 切段 → 向量化 → 建立臨時 collection → 用 doc 模式回答 → 清理臨時 collection
+    回傳格式與 /ask、/fetch_url 對齊。
+    """
+    # 1) 取文（沿用你現有的 _extract_text_from_url）
+    fulltext = _extract_text_from_url(url)
+
+    # 2) 清理 + 切段（沿用你在 fetch_url 的做法）
+    def approx_tokens(s: str) -> int:
+        return max(1, int(len(s) / 3.5))
+
+    def chunk_text(text: str, max_tokens_per_chunk: int = 400):
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        chunks, cur, cur_tok = [], [], 0
+        for ln in lines:
+            t = approx_tokens(ln)
+            if cur_tok + t > max_tokens_per_chunk and cur:
+                chunks.append("\n".join(cur))
+                cur, cur_tok = [], 0
+            cur.append(ln)
+            cur_tok += t
+        if cur:
+            chunks.append("\n".join(cur))
+        return chunks
+
+    import re as _re
+    def light_clean(s: str) -> str:
+        s = _re.sub(r'\n{2,}', '\n', s)
+        s = _re.sub(r'(cookie|accept|privacy).{0,40}', '', s, flags=_re.I)
+        s = _re.sub(r'(terms|subscribe|sign in|login).{0,40}', '', s, flags=_re.I)
+        return s
+
+    cleaned = light_clean(fulltext)
+    segments = chunk_text(cleaned, max_tokens_per_chunk=400)
+
+    # 上限保護（最多 ~50k tokens）
+    HARD_MAX_TOKENS = 50000
+    kept, acc = [], 0
+    for s in segments:
+        t = approx_tokens(s)
+        if acc + t > HARD_MAX_TOKENS:
+            break
+        kept.append(s); acc += t
+
+    paragraphs = [{"page": 1, "text": s, "source": url} for s in kept]
+
+    # 3) 向量化
+    vectors = qna.embed_paragraphs([p["text"] for p in paragraphs])
+    if not vectors:
+        raise HTTPException(status_code=500, detail="向量產生失敗")
+    dim = len(vectors[0])
+
+    # 4) 臨時 collection
+    import hashlib
+    cid = "_url_" + hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
+    vector_store.reset_collection(cid, dim)
+    vector_store.add_embeddings(cid, vectors, paragraphs)
+
+    # 5) 問答（doc 模式）
+    user_query = summary_query or "請用上面網址內容條列重點並進行摘要"
+    answer, mode_used, meta = qna.answer_question(
+        query=user_query, top_k=top_k, mode="doc", sources=None, collection_id=cid
+    )
+
+    # 6) 清空臨時 collection（避免累積）
+    try:
+        vector_store.reset_collection(cid, dim)
+    except Exception:
+        pass
+
+    # 7) 回傳
+    return {
+        "ok": True,
+        "url": url,
+        "question": user_query,
+        "answer": answer,
+        "mode": mode_used,  # "doc"
+        "usage": meta.get("usage", {}),
+        "sources": meta.get("sources", []),
+        "cost_usd": round(meta.get("total_cost_usd", 0.0), 6),
+        "embedding_cost": round(meta.get("embedding_cost", 0.0), 6),
+        "chat_cost": round(meta.get("chat_cost", 0.0), 6),
+        "transcribe_cost": round(meta.get("transcribe_cost", 0.0), 6),
+        "collectionId": cid,
+    }
 
 
 @app.post("/fetch_url", summary="讀取網址內容並進行問答（不持久保存）")
@@ -150,112 +247,118 @@ async def fetch_url(
     query: str = Form("請用上面網址內容條列重點並進行摘要"),
     top_k: int = Form(5),
 ):
-    """
-    讀取指定 URL → 擷取文字 → 臨時建立向量集合 → 問答 → 立即清空集合。
-    不會長期保存內容。
-    """
     try:
-        # 1) 取文
-        fulltext = _extract_text_from_url(url)
-
-        # === 切段與清理 ===
-        def approx_tokens(s: str) -> int:
-            return max(1, int(len(s) / 3.5))  # 粗估 tokens 數
-
-        def chunk_text(text: str, max_tokens_per_chunk: int = 400):
-            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-            chunks, cur, cur_tok = [], [], 0
-            for ln in lines:
-                t = approx_tokens(ln)
-                if cur_tok + t > max_tokens_per_chunk and cur:
-                    chunks.append("\n".join(cur))
-                    cur, cur_tok = [], 0
-                cur.append(ln)
-                cur_tok += t
-            if cur:
-                chunks.append("\n".join(cur))
-            return chunks
-
-        import re
-        def light_clean(s: str) -> str:
-            s = re.sub(r'\n{2,}', '\n', s)
-            s = re.sub(r'(cookie|accept|privacy).{0,40}', '', s, flags=re.I)
-            s = re.sub(r'(terms|subscribe|sign in|login).{0,40}', '', s, flags=re.I)
-            return s
-
-        cleaned = light_clean(fulltext)
-        segments = chunk_text(cleaned, max_tokens_per_chunk=400)
-
-        # === 取得全部分段 ===
-        selected = segments
-
-        # 加一個「極限上限」避免惡意超長頁耗死記憶體，例如 50k tokens：
-        HARD_MAX_TOKENS = 50000
-        total_toks = sum(max(1, int(len(s)/3.5)) for s in selected)
-        if total_toks > HARD_MAX_TOKENS:
-            # 保守只取前面到 50k tokens 為止
-            kept, acc = [], 0
-            for s in selected:
-                t = max(1, int(len(s)/3.5))
-                if acc + t > HARD_MAX_TOKENS:
-                    break
-                kept.append(s)
-                acc += t
-            selected = kept
-
-        paragraphs = [{"page": 1, "text": s, "source": url} for s in selected]
-
-        # === 向量化 ===
-        vectors = qna.embed_paragraphs([p["text"] for p in paragraphs])
-        if not vectors:
-            raise HTTPException(status_code=500, detail="向量產生失敗")
-        dim = len(vectors[0])
-
-        # === 臨時 collection ===
-        import hashlib
-        cid = "_url_" + hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
-        vector_store.reset_collection(cid, dim)
-
-        for p in paragraphs:
-            p.setdefault("source", url)
-        vector_store.add_embeddings(cid, vectors, paragraphs)
-
-        # === 問答 ===
-        answer, mode_used, meta = qna.answer_question(
-            query=query,
-            top_k=top_k,
-            mode="doc", # 因為 URL 有提供文字，視為有文件
-            sources=None,
-            collection_id=cid,
-        )
-
-        # === 清空臨時集合 ===
-        try:
-            vector_store.reset_collection(cid, dim)
-        except Exception:
-            pass
-
-        # === 回傳結果 ===
-        return {
-            "ok": True,
-            "url": url,
-            "question": query,
-            "answer": answer,
-            "mode": mode_used,
-            "usage": meta.get("usage", {}),
-            "sources": meta.get("sources", []),
-            "cost_usd": round(meta.get("total_cost_usd", 0.0), 6),
-            "embedding_cost": round(meta.get("embedding_cost", 0.0), 6),
-            "chat_cost": round(meta.get("chat_cost", 0.0), 6),
-            "transcribe_cost": round(meta.get("transcribe_cost", 0.0), 6),
-        }
-
+        return await _answer_from_url(url, top_k=top_k, summary_query=query)
     except HTTPException:
         raise
     except Exception:
-        import traceback
-        detail = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=detail)
+        raise HTTPException(status_code=500, detail=traceback.format_exc())
+    # """
+    # 讀取指定 URL → 擷取文字 → 臨時建立向量集合 → 問答 → 立即清空集合。
+    # 不會長期保存內容。
+    # """
+    # try:
+    #     # 1) 取文
+    #     fulltext = _extract_text_from_url(url)
+
+    #     # === 切段與清理 ===
+    #     def approx_tokens(s: str) -> int:
+    #         return max(1, int(len(s) / 3.5))  # 粗估 tokens 數
+
+    #     def chunk_text(text: str, max_tokens_per_chunk: int = 400):
+    #         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    #         chunks, cur, cur_tok = [], [], 0
+    #         for ln in lines:
+    #             t = approx_tokens(ln)
+    #             if cur_tok + t > max_tokens_per_chunk and cur:
+    #                 chunks.append("\n".join(cur))
+    #                 cur, cur_tok = [], 0
+    #             cur.append(ln)
+    #             cur_tok += t
+    #         if cur:
+    #             chunks.append("\n".join(cur))
+    #         return chunks
+
+    #     import re
+    #     def light_clean(s: str) -> str:
+    #         s = re.sub(r'\n{2,}', '\n', s)
+    #         s = re.sub(r'(cookie|accept|privacy).{0,40}', '', s, flags=re.I)
+    #         s = re.sub(r'(terms|subscribe|sign in|login).{0,40}', '', s, flags=re.I)
+    #         return s
+
+    #     cleaned = light_clean(fulltext)
+    #     segments = chunk_text(cleaned, max_tokens_per_chunk=400)
+
+    #     # === 取得全部分段 ===
+    #     selected = segments
+
+    #     # 加一個「極限上限」避免惡意超長頁耗死記憶體，例如 50k tokens：
+    #     HARD_MAX_TOKENS = 50000
+    #     total_toks = sum(max(1, int(len(s)/3.5)) for s in selected)
+    #     if total_toks > HARD_MAX_TOKENS:
+    #         # 保守只取前面到 50k tokens 為止
+    #         kept, acc = [], 0
+    #         for s in selected:
+    #             t = max(1, int(len(s)/3.5))
+    #             if acc + t > HARD_MAX_TOKENS:
+    #                 break
+    #             kept.append(s)
+    #             acc += t
+    #         selected = kept
+
+    #     paragraphs = [{"page": 1, "text": s, "source": url} for s in selected]
+
+    #     # === 向量化 ===
+    #     vectors = qna.embed_paragraphs([p["text"] for p in paragraphs])
+    #     if not vectors:
+    #         raise HTTPException(status_code=500, detail="向量產生失敗")
+    #     dim = len(vectors[0])
+
+    #     # === 臨時 collection ===
+    #     import hashlib
+    #     cid = "_url_" + hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
+    #     vector_store.reset_collection(cid, dim)
+
+    #     for p in paragraphs:
+    #         p.setdefault("source", url)
+    #     vector_store.add_embeddings(cid, vectors, paragraphs)
+
+    #     # === 問答 ===
+    #     answer, mode_used, meta = qna.answer_question(
+    #         query=query,
+    #         top_k=top_k,
+    #         mode="doc", # 因為 URL 有提供文字，視為有文件
+    #         sources=None,
+    #         collection_id=cid,
+    #     )
+
+    #     # === 清空臨時集合 ===
+    #     try:
+    #         vector_store.reset_collection(cid, dim)
+    #     except Exception:
+    #         pass
+
+    #     # === 回傳結果 ===
+    #     return {
+    #         "ok": True,
+    #         "url": url,
+    #         "question": query,
+    #         "answer": answer,
+    #         "mode": mode_used,
+    #         "usage": meta.get("usage", {}),
+    #         "sources": meta.get("sources", []),
+    #         "cost_usd": round(meta.get("total_cost_usd", 0.0), 6),
+    #         "embedding_cost": round(meta.get("embedding_cost", 0.0), 6),
+    #         "chat_cost": round(meta.get("chat_cost", 0.0), 6),
+    #         "transcribe_cost": round(meta.get("transcribe_cost", 0.0), 6),
+    #     }
+
+    # except HTTPException:
+    #     raise
+    # except Exception:
+    #     import traceback
+    #     detail = traceback.format_exc()
+    #     raise HTTPException(status_code=500, detail=detail)
 
 
 
@@ -394,6 +497,11 @@ async def ask_question(
     """
     回傳問答結果 + 成本細項
     """
+    # 先判斷是不是 URL
+    _strip_q = query.strip()
+    if URL_RE.match(_strip_q):
+        # 直接走網址流程；前端只要打一個 /ask 就行
+        return await _answer_from_url(_strip_q, top_k=top_k)
 
     # 1) 正規化 collectionId：沒有就保持 None（不要自動設成 '_default'）
     def _norm_collection_id(cid: Optional[str]) -> Optional[str]:

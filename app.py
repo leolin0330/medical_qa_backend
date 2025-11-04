@@ -13,6 +13,9 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 import re
+from pathlib import Path
+from fastapi import Request, Query
+from typing import List, Optional
 
 
 
@@ -55,7 +58,31 @@ app.add_middleware(                        # 加入 CORS 中介層，允許跨�
 )
 
 # 偵測網址
-URL_RE = re.compile(r"^https?://", re.I)
+URL_RE = re.compile(r"https?://[^\s]+")
+
+
+def _norm_collection_id(cid: Optional[str]) -> Optional[str]:
+    INVALID_VALUES = {"", "string", "null", "undefined", "none"}
+    if cid is None or cid.strip().lower() in INVALID_VALUES:
+        return None
+    cid = cid.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", cid):
+        raise HTTPException(status_code=400, detail="非法的 collectionId")
+    return cid
+
+def _split_url_and_instruction(text: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    從 text 中抓第一個 URL；其餘文字視為 instruction。
+    回傳: (url 或 None, instruction 或 None)
+    """
+    m = URL_RE.search(text)
+    if not m:
+        return None, text.strip() or None
+    url = m.group(0)
+    # 去掉第一個 url 後的殘餘字串
+    inst = (text[:m.start()] + text[m.end():]).strip()
+    return url, (inst if inst else None)
+
 
 # 處理網址
 def _extract_text_from_url(url: str, timeout: int = 12) -> str:
@@ -147,10 +174,14 @@ def get_media_duration_sec(path: str) -> float:
         return 0.0
 # === end cost tracking ===
 
-# app.py（只貼出需要修改/新增的重點）
-from pathlib import Path
-from fastapi import Request, Query
-from typing import List, Optional
+# 清理工具（避免 Swagger 預設 "string" 亂入）
+def _clean_str(val: Optional[str]) -> Optional[str]:
+    if val is None:
+        return None
+    v = val.strip()
+    if not v or v.lower() in {"string", "null", "none", "undefined"}:
+        return None
+    return v
 
 
 async def _answer_from_url(url: str, top_k: int = 5, summary_query: str | None = None):
@@ -253,113 +284,6 @@ async def fetch_url(
         raise
     except Exception:
         raise HTTPException(status_code=500, detail=traceback.format_exc())
-    # """
-    # 讀取指定 URL → 擷取文字 → 臨時建立向量集合 → 問答 → 立即清空集合。
-    # 不會長期保存內容。
-    # """
-    # try:
-    #     # 1) 取文
-    #     fulltext = _extract_text_from_url(url)
-
-    #     # === 切段與清理 ===
-    #     def approx_tokens(s: str) -> int:
-    #         return max(1, int(len(s) / 3.5))  # 粗估 tokens 數
-
-    #     def chunk_text(text: str, max_tokens_per_chunk: int = 400):
-    #         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    #         chunks, cur, cur_tok = [], [], 0
-    #         for ln in lines:
-    #             t = approx_tokens(ln)
-    #             if cur_tok + t > max_tokens_per_chunk and cur:
-    #                 chunks.append("\n".join(cur))
-    #                 cur, cur_tok = [], 0
-    #             cur.append(ln)
-    #             cur_tok += t
-    #         if cur:
-    #             chunks.append("\n".join(cur))
-    #         return chunks
-
-    #     import re
-    #     def light_clean(s: str) -> str:
-    #         s = re.sub(r'\n{2,}', '\n', s)
-    #         s = re.sub(r'(cookie|accept|privacy).{0,40}', '', s, flags=re.I)
-    #         s = re.sub(r'(terms|subscribe|sign in|login).{0,40}', '', s, flags=re.I)
-    #         return s
-
-    #     cleaned = light_clean(fulltext)
-    #     segments = chunk_text(cleaned, max_tokens_per_chunk=400)
-
-    #     # === 取得全部分段 ===
-    #     selected = segments
-
-    #     # 加一個「極限上限」避免惡意超長頁耗死記憶體，例如 50k tokens：
-    #     HARD_MAX_TOKENS = 50000
-    #     total_toks = sum(max(1, int(len(s)/3.5)) for s in selected)
-    #     if total_toks > HARD_MAX_TOKENS:
-    #         # 保守只取前面到 50k tokens 為止
-    #         kept, acc = [], 0
-    #         for s in selected:
-    #             t = max(1, int(len(s)/3.5))
-    #             if acc + t > HARD_MAX_TOKENS:
-    #                 break
-    #             kept.append(s)
-    #             acc += t
-    #         selected = kept
-
-    #     paragraphs = [{"page": 1, "text": s, "source": url} for s in selected]
-
-    #     # === 向量化 ===
-    #     vectors = qna.embed_paragraphs([p["text"] for p in paragraphs])
-    #     if not vectors:
-    #         raise HTTPException(status_code=500, detail="向量產生失敗")
-    #     dim = len(vectors[0])
-
-    #     # === 臨時 collection ===
-    #     import hashlib
-    #     cid = "_url_" + hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
-    #     vector_store.reset_collection(cid, dim)
-
-    #     for p in paragraphs:
-    #         p.setdefault("source", url)
-    #     vector_store.add_embeddings(cid, vectors, paragraphs)
-
-    #     # === 問答 ===
-    #     answer, mode_used, meta = qna.answer_question(
-    #         query=query,
-    #         top_k=top_k,
-    #         mode="doc", # 因為 URL 有提供文字，視為有文件
-    #         sources=None,
-    #         collection_id=cid,
-    #     )
-
-    #     # === 清空臨時集合 ===
-    #     try:
-    #         vector_store.reset_collection(cid, dim)
-    #     except Exception:
-    #         pass
-
-    #     # === 回傳結果 ===
-    #     return {
-    #         "ok": True,
-    #         "url": url,
-    #         "question": query,
-    #         "answer": answer,
-    #         "mode": mode_used,
-    #         "usage": meta.get("usage", {}),
-    #         "sources": meta.get("sources", []),
-    #         "cost_usd": round(meta.get("total_cost_usd", 0.0), 6),
-    #         "embedding_cost": round(meta.get("embedding_cost", 0.0), 6),
-    #         "chat_cost": round(meta.get("chat_cost", 0.0), 6),
-    #         "transcribe_cost": round(meta.get("transcribe_cost", 0.0), 6),
-    #     }
-
-    # except HTTPException:
-    #     raise
-    # except Exception:
-    #     import traceback
-    #     detail = traceback.format_exc()
-    #     raise HTTPException(status_code=500, detail=detail)
-
 
 
 
@@ -487,62 +411,98 @@ async def upload_pdf(
 
 
         
-@app.post("/ask", summary="醫學問答查詢")
+@app.post("/ask", summary="醫學問答查詢（支援純文字 / 純網址 / 網址+指令）")
 async def ask_question(
-    query: str = Form(...),
+    query: Optional[str] = Form(None),
+    url: Optional[str] = Form(None),
+    instruction: Optional[str] = Form(None),
     top_k: int = Form(5),
-    source: Optional[List[str]] = Query(None),        # 來源清單（query string）
-    collectionId: Optional[str] = Form(None),         # 指定要查詢的 collection
+    source: Optional[List[str]] = Query(None),
+    collectionId: Optional[str] = Form(None),
 ):
     """
-    回傳問答結果 + 成本細項
+    支援：
+    1) 純文字：query="請解釋xxx"
+    2) 純網址：url="https://pmc...."
+    3) 網址+指令：
+       - 方式A：query="https://pmc.... 整理重點"
+       - 方式B：url="https://pmc...."  +  instruction="整理重點"
     """
-    # 先判斷是不是 URL
-    _strip_q = query.strip()
-    if URL_RE.match(_strip_q):
-        # 直接走網址流程；前端只要打一個 /ask 就行
-        return await _answer_from_url(_strip_q, top_k=top_k)
+    try:
+        # --- 清理 Swagger 預設值 ---
+        def _clean_str(val: Optional[str]) -> Optional[str]:
+            if val is None:
+                return None
+            v = val.strip()
+            if not v or v.lower() in {"string", "null", "none", "undefined"}:
+                return None
+            return v
 
-    # 1) 正規化 collectionId：沒有就保持 None（不要自動設成 '_default'）
-    def _norm_collection_id(cid: Optional[str]) -> Optional[str]:
-        INVALID_VALUES = {"", "string", "null", "undefined", "none"}
-        if cid is None or cid.strip().lower() in INVALID_VALUES:
-            return None
-        cid = cid.strip()
-        if not re.fullmatch(r"[A-Za-z0-9_\\-]{1,64}", cid):
-            raise HTTPException(status_code=400, detail="非法的 collectionId")
-        return cid
+        query = _clean_str(query)
+        url = _clean_str(url)
+        instruction = _clean_str(instruction)
+        collectionId = _clean_str(collectionId)
 
-    cid = _norm_collection_id(collectionId)
+        cid = _norm_collection_id(collectionId)
+        sources = [s for s in (source or []) if s] or None
+        pure_text: Optional[str] = None
 
-    # 2) 正規化 sources：空/未提供都當作 None
-    sources = [s for s in (source or []) if s] or None
+        # --- 先拆網址與文字 ---
+        if url:
+            url = url.strip()
+            # 若不是合法網址，視為純文字問題
+            if not URL_RE.match(url):
+                merged = " ".join(x for x in [(query or ""), url, (instruction or "")] if x).strip()
+                pure_text = merged or None
+                url = None
+                instruction = None
+        elif query:
+            q = query.strip()
+            u, inst = _split_url_and_instruction(q)
+            if u:
+                url = u
+                instruction = instruction or inst
+            else:
+                pure_text = q
+        else:
+            raise HTTPException(status_code=400, detail="缺少 query 或 url")
 
-    # 3)改為自動依據是否有文件來回答
-    has_sources = bool(sources or cid)
+        # --- 分支處理 ---
+        if url:
+            # ✅ 真的抓網址內容並回答
+            return await _answer_from_url(
+                url,
+                top_k=top_k,
+                summary_query=instruction or "請用上面網址內容條列重點並進行摘要",
+            )
 
-    answer, mode_used, meta = qna.answer_question(
-        query=query,
-        top_k=top_k,
-        mode="doc" if has_sources else "general",  # 自動決定
-        sources=sources,
-        collection_id=cid,
-    )
+        # ✅ 純文字情境
+        answer, mode_used, meta = qna.answer_question(
+            query=pure_text,
+            top_k=top_k,
+            mode="doc" if (sources or cid) else "general",
+            sources=sources,
+            collection_id=cid,
+        )
 
-    # 5) 統一回傳（保留你原本欄位）
-    return {
-        "ok": True,
-        "collectionId": cid or meta.get("collection_id"),
-        "question": query,
-        "answer": answer,
-        "mode": mode_used,                                     # 實際使用的模式
-        "cost_usd": round(meta.get("total_cost_usd", 0.0), 6),
-        "embedding_cost": round(meta.get("embedding_cost", 0.0), 6),
-        "chat_cost": round(meta.get("chat_cost", 0.0), 6),
-        "transcribe_cost": round(meta.get("transcribe_cost", 0.0), 6),
-        "usage": meta.get("usage", {}),
-        "sources": meta.get("sources", []) or (sources or []), # 方便你前端/Network 檢查
-    }
+        return {
+            "ok": True,
+            "collectionId": cid or meta.get("collection_id"),
+            "question": pure_text,
+            "answer": answer,
+            "mode": mode_used,
+            "cost_usd": round(meta.get("total_cost_usd", 0.0), 6),
+            "embedding_cost": round(meta.get("embedding_cost", 0.0), 6),
+            "chat_cost": round(meta.get("chat_cost", 0.0), 6),
+            "transcribe_cost": round(meta.get("transcribe_cost", 0.0), 6),
+            "usage": meta.get("usage", {}),
+            "sources": meta.get("sources", []) or (sources or []),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 

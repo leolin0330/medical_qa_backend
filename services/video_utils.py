@@ -251,3 +251,16 @@ def fuse_text(audio_text: str, captions_text: str) -> str:
         return "（無法產生有效的語音與畫面內容）"
 
     return "\n".join(out).strip()
+
+
+def caption_single_image(image_path: str | Path):
+    """
+    單張圖片 → GPT-4o 視覺描述。
+    回傳：(描述文字, vision_cost)
+    """
+    p = Path(image_path)
+    items = [(p, 0.0)]                 # 假設時間 0 秒
+    captions = _caption_batch(items)   # 重用影片的 caption 流程
+    text = captions[0] if captions else "（無法產生描述）"
+    vision_cost = 0.011                # 單張影像固定成本
+    return text, vision_cost

@@ -47,6 +47,7 @@ def _client() -> OpenAI:
 TEXT_EXTS  = {".txt", ".html", ".htm", ".pdf", ".docx", ".pptx"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a"}
 VIDEO_EXTS = {".mp4", ".mov", ".m4v"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 
 def _is_audio(path: Path) -> bool:
     return path.suffix.lower() in AUDIO_EXTS
@@ -56,6 +57,9 @@ def _is_video(path: Path) -> bool:
 
 def _is_text(path: Path) -> bool:
     return path.suffix.lower() in TEXT_EXTS
+
+def _is_image(path: Path) -> bool:      
+    return path.suffix.lower() in IMAGE_EXTS
 
 
 # =========================
@@ -246,16 +250,28 @@ def extract_from_video_audioonly(src: str) -> str:
         return extract_from_audio(audio_path)
 
 
+def extract_from_image(path: str | Path):
+    """
+    單張圖片：呼叫 GPT-4o 視覺模型做醫學描述。
+    回傳：描述文字 + 預估 vision_cost
+    """
+    p = Path(path)
+    # 直接呼叫 video_utils 內的單張圖片 caption 函式（下面第 2 部分會加）
+    caption, vision_cost = video_utils.caption_single_image(p)
+    return _normalize_text(caption), vision_cost
+
+
 
 # =========================
 # 統一入口（供外部呼叫）
 # =========================
 def extract_any(path: str | Path) -> str:
     """
-    依副檔名自動選擇解析方式，回傳『全文文字字串』。
+    依副檔名自動選擇解析方式，回傳 (文字內容, vision_cost)。
     - 文字檔：TXT / HTML / PDF / DOCX / PPTX
     - 音檔：MP3 / WAV / M4A（Whisper）
     - 影片：MP4 / MOV / M4V（ffmpeg 抽音 + Whisper）
+    - 圖片：JPG / PNG / BMP（GPT-4o 視覺摘要）
     """
     p = Path(path)
     ext = p.suffix.lower()
@@ -268,6 +284,11 @@ def extract_any(path: str | Path) -> str:
     # 影片
     if _is_video(p):
         return extract_from_video(p)
+    
+    # #圖片
+    if _is_image(p):
+        text, vision_cost = extract_from_image(p)
+        return text, vision_cost
 
     # 純文字
     if ext == ".txt":

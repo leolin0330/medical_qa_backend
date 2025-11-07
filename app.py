@@ -35,7 +35,10 @@ app = FastAPI(                             # 建立 FastAPI 應用實例
     version="0.1.0"                        # 版本號
 )
 
-ALLOWED_EXTS = {".txt", ".html", ".htm", ".pdf", ".docx", ".pptx",".mp3", ".wav", ".m4a",".mp4", ".mov", ".m4v"}#可讀取的文件
+ALLOWED_EXTS = {".txt", ".html", ".htm", ".pdf", ".docx", ".pptx",
+                ".mp3", ".wav", ".m4a",".mp4", ".mov", ".m4v",
+                ".jpg", ".jpeg", ".png", ".bmp", 
+                }#可讀取的文件
 
 # 單位：MB
 LIMITS_MB = {
@@ -47,6 +50,8 @@ LIMITS_MB = {
     "mp3": 50, "wav": 50, "m4a": 50,
     # 影片
     "mp4": 100, "mov": 100, "m4v": 100,
+    # 圖片
+     "jpg": 10, "jpeg": 10, "png": 10, "bmp": 10,
 }
 
 app.include_router(knowledge_router)       # 掛載外部子路由（/knowledge 等），讓該 router 內的端點生效

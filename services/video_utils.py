@@ -25,6 +25,9 @@ BATCH_SIZE = int(os.getenv("CAPTION_BATCH_SIZE", "12"))
 FRAME_RESIZE_WIDTH = int(os.getenv("FRAME_RESIZE_WIDTH", "768"))
 # 使用的多模態模型（可用 gpt-4o 或 gpt-4o-mini）
 VISION_MODEL = os.getenv("VISION_MODEL", "gpt-4o")
+
+VISION_COST_PER_FRAME = float(os.getenv("PRICE_VISION_PER_FRAME", "0.011"))
+
 # 影像 caption 的系統提示（醫療/教學友好）
 CAPTION_SYSTEM_PROMPT = os.getenv(
     "CAPTION_SYSTEM_PROMPT",
@@ -203,7 +206,7 @@ def generate_captions(video_path: str) -> str:
 
         # 合併為可讀段落
         merged = "\n".join(all_lines)
-        vision_cost = round(len(pairs) * 0.011, 5)  # 影格數 × 單張成本，保留 5 位小數
+        vision_cost = round(len(pairs) * VISION_COST_PER_FRAME, 5)
         print(f"[成本統計] 抽取 {len(pairs)} 張圖像 → 預估 GPT-4o 視覺處理成本：${vision_cost}")
         return merged.strip(), vision_cost
     

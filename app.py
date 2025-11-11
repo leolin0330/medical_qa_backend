@@ -538,6 +538,11 @@ from fastapi import Request, Query   # Request 用來取 header；Query 用來�
 from typing import List, Optional    # 型別註記用
 
 
+from routers import news_api
+from routers.news_api import router as news_router
+
+
+
 # ==========================
 # FastAPI 應用與基本設定
 # ==========================
@@ -545,9 +550,10 @@ from typing import List, Optional    # 型別註記用
 # （舊版：曾經在這邊初始化向量庫，現在改成在別處處理）
 # vector_store.init_index(1536)  # OpenAI ada-002 向量長度 dotenv
 
-# .\.venv\Scripts\Activate.ps1              
-# python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000
-# http://127.0.0.1:8000/docs               
+# .\.venv\Scripts\Activate.ps1              # （備忘）啟動虛擬環境的 PowerShell 指令
+# python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000   # （備忘）啟動開發伺服器
+# http://127.0.0.1:8000/docs               # （備忘）Swagger UI 文件入口 
+#  deactivate 
 
 app = FastAPI(                             # 建立 FastAPI 應用實例
     title="Medical QA Backend",            # 顯示在 /docs Swagger UI 頁面的標題
@@ -578,6 +584,7 @@ LIMITS_MB = {
 
 # 掛載 /knowledge 相關的路由（例如：列出 collections、刪除 collection 等）
 app.include_router(knowledge_router)
+app.include_router(news_router)
 
 # 加入 CORS 中介層，讓前端（例如：你在手機上的 Flutter App、本機 Web）可以跨網域呼叫 API
 app.add_middleware(

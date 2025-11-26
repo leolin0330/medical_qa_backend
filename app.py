@@ -539,7 +539,7 @@ from typing import List, Optional    # 型別註記用
 
 
 from routers import news_api
-from routers.news_api import router as news_router
+from routers.news_api import router as news_router, refresh_who_news
 
 
 
@@ -593,6 +593,19 @@ app.add_middleware(
     allow_methods=["*"],        # 允許所有 HTTP 方法（GET/POST/PUT/DELETE 等）
     allow_headers=["*"],        # 允許所有自訂標頭
 )
+
+# ==========================
+# 啟動時預先抓一次 WHO 快訊
+# ==========================
+@app.on_event("startup")
+def preload_news():
+    try:
+        # 預抓 20 則，直接翻成繁中，存在 NEWS_CACHE 裡
+        refresh_who_news(limit=20, target_lang="zh-TW")
+        print("[NEWS] 伺服器啟動時已預抓 WHO 快訊")
+    except Exception as e:
+        # 就算失敗也不要讓整個 app 掛掉，只是印 log
+        print(f"[NEWS] 啟動時預抓 WHO 快訊失敗: {e}")
 
 # ==========================
 # 共用工具：網址與字串處理

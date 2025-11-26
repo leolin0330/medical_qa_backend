@@ -327,6 +327,8 @@ from services import vector_store          # 你自己的向量庫封裝（FAISS
 import json
 from pathlib import Path
 import re
+from typing import Optional, List, Dict, Any
+
 
 # === transcribe cost merge ===
 # 這一段是「從成本檔案中讀出 / 更新 影音轉錄（Whisper）費用」的工具。
@@ -558,9 +560,6 @@ def _answer_general(query: str) -> Tuple[str, Dict]:
     }
 
 
-from typing import Optional, List
-from typing import Optional, List, Tuple, Dict
-# 上面兩行重複 import，不影響執行，你之後有空可以刪掉一組。
 
 
 def answer_question(

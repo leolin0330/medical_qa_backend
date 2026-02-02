@@ -541,6 +541,8 @@ from typing import List, Optional    # 型別註記用
 from routers import news_api
 from routers.news_api import router as news_router, refresh_who_news
 
+from routers import find_papers
+
 
 
 # ==========================
@@ -585,6 +587,7 @@ LIMITS_MB = {
 # 掛載 /knowledge 相關的路由（例如：列出 collections、刪除 collection 等）
 app.include_router(knowledge_router)
 app.include_router(news_router)
+app.include_router(find_papers.router)
 
 # 加入 CORS 中介層，讓前端（例如：你在手機上的 Flutter App、本機 Web）可以跨網域呼叫 API
 app.add_middleware(

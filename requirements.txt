@@ -40,4 +40,4 @@ numpy==1.26.4
 imageio-ffmpeg
 beautifulsoup4
 feedparser
-
+requests

@@ -34,6 +34,11 @@ from routers.news_api import router as news_router, refresh_who_news
 from routers import find_papers
 import threading
 
+from routers.auth import get_current_user
+from fastapi import Depends
+
+from database.db import engine
+from models.user_model import Base
 
 
 # ==========================
@@ -49,6 +54,7 @@ app = FastAPI(                             # 建立 FastAPI 應用實例
 
 
 app.include_router(auth.router)
+Base.metadata.create_all(bind=engine)
 
 # 允許上傳的副檔名集合（有點像白名單）
 ALLOWED_EXTS = {
@@ -427,6 +433,7 @@ async def _answer_from_url(url: str, top_k: int = 5, summary_query: str | None =
 
 @app.post("/fetch_url", summary="讀取網址內容並進行問答（不持久保存）")
 async def fetch_url(
+    current_user: str = Depends(get_current_user),
     url: str = Form(...),  # 表單欄位：網址
     query: str = Form("請用上面網址內容條列重點並進行摘要"),  # 問題（可改寫成想問的內容）
     top_k: int = Form(5),  # 從向量庫取前幾名相似段落
@@ -453,6 +460,7 @@ async def upload_pdf(
     file: UploadFile = File(...),        # 上傳檔案
     collectionId: str = Form(None),      # 指定存入哪個 collection（資料夾/知識庫）
     mode: str = Form("overwrite"),       # "overwrite"：清空舊資料；其他：append
+    current_user: str = Depends(get_current_user),
 ):
     try:
         # === 1) 驗證副檔名與上限 ===
@@ -597,6 +605,7 @@ async def upload_pdf(
 
 @app.post("/ask", summary="醫學問答查詢（支援純文字 / 純網址 / 網址+指令）")
 async def ask_question(
+    # current_user: str = Depends(get_current_user), 不用驗證登入就能用
     query: Optional[str] = Form(None),          # 一般問題或「含網址的文字」
     url: Optional[str] = Form(None),           # 單獨提供網址用
     instruction: Optional[str] = Form(None),   # 若 url 另外提供，就當作補充指令

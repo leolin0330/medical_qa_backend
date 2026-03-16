@@ -300,39 +300,3 @@ def api_get_news(
         "items": items,
         "note": "使用今日快取（不會重新抓 WHO）"
     }
-
-# @router.get("/news", summary="取得 WHO 最新新聞（/news 卡片 + Headlines 合併，可選繁中翻譯）")
-# def get_news(
-#     source: str = Query("who", description="目前只支援 'who'"),
-#     limit: int = Query(10, ge=1, le=10, description="最多幾筆（1~10）"),
-#     lang: str = Query("en", description="目標語言（ex: en, zh-TW, zh, zh-Hant）"),
-#     translate: bool = Query(False, description="是否啟用伺服器端翻譯"),
-#     target: str = Query(None, description="覆蓋目標語言；預設跟 lang 同"),
-# ):
-#     """
-#     例：
-#       /news?source=who&limit=10                 -> 英文
-#       /news?source=who&limit=10&lang=zh-TW      -> 觸發繁中（等同 translate=true）
-#       /news?translate=true&target=zh-TW         -> 強制翻譯到指定語言
-#     回傳資料包含：
-#       英文欄位：title, summary
-#       若翻譯成功：title_zh, summary_zh（或 target 語言對應欄位名固定為 *_zh）
-#     """
-#     if source.lower() != "who":
-#         raise HTTPException(status_code=400, detail="目前只支援 source=who")
-
-#     # 判斷是否要翻譯 & 目標語言
-#     do_translate = translate or lang.lower() in ("zh", "zh-tw", "zh-hant")
-#     target_lang = (target or (lang if do_translate else "en")).strip() or "zh-TW"
-
-#     items = _fetch_latest_who_news(limit=limit, do_translate=do_translate, target=target_lang)
-
-#     return {
-#         "items": items,
-#         "translated": bool(do_translate and OPENAI_API_KEY),
-#         "target_lang": target_lang if do_translate else "en",
-#         "note": (
-#             None if OPENAI_API_KEY else
-#             "OPENAI_API_KEY 未設定，已回傳英文原文"
-#         )
-#     }

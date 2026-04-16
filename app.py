@@ -126,8 +126,57 @@ def preload_news():
 # 用正規表示式偵測網址（最簡單版，找到第一個 http/https 開頭的字串）
 URL_RE = re.compile(r"https?://[^\s]+")
 
+# import hashlib
+# def _norm_collection_id(cid: Optional[str]) -> Optional[str]:
+#     """
+#     將前端傳來的 collectionId 做標準化處理：
+#     - 去掉空字串、"string"、"null" 等 Swagger 預設垃圾值
+#     - 驗證只能包含 英數、底線、減號，長度 1~64
+#     - 若不合法則丟出 400 錯誤
+#     """
+#     INVALID_VALUES = {"", "string", "null", "undefined", "none"}
+#     if cid is None or cid.strip().lower() in INVALID_VALUES:
+#         return None
+#     cid = cid.strip()
+#     safe_id = hashlib.md5(cid.encode("utf-8")).hexdigest()[:12]
+#     # if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", cid):
+#     if not re.fullmatch(r"[\w\u4e00-\u9fff\-]{1,64}", cid):
+#         raise HTTPException(status_code=400, detail="非法的 collectionId")
+#     return cid
 
-def _norm_collection_id(cid: Optional[str]) -> Optional[str]:
+
+# ===== collection mapping =====
+import json
+from pathlib import Path
+
+MAP_PATH = Path("data/collections/map.json")
+
+def load_map():
+    if not MAP_PATH.exists():
+        return {}
+    return json.loads(MAP_PATH.read_text(encoding="utf-8"))
+
+def save_map(m):
+    MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MAP_PATH.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def get_or_create_cid(name: str):
+    m = load_map()
+
+    if name in m:
+        return m[name]
+
+    import hashlib
+    cid = hashlib.md5(name.encode("utf-8")).hexdigest()[:12]
+    m[name] = cid
+    save_map(m)
+
+    return cid
+
+
+import hashlib
+
+def _norm_collection_id(cid: str | None) -> str:
     """
     將前端傳來的 collectionId 做標準化處理：
     - 去掉空字串、"string"、"null" 等 Swagger 預設垃圾值
@@ -135,12 +184,16 @@ def _norm_collection_id(cid: Optional[str]) -> Optional[str]:
     - 若不合法則丟出 400 錯誤
     """
     INVALID_VALUES = {"", "string", "null", "undefined", "none"}
+
     if cid is None or cid.strip().lower() in INVALID_VALUES:
-        return None
+        return "_default"
+
     cid = cid.strip()
-    if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", cid):
-        raise HTTPException(status_code=400, detail="非法的 collectionId")
-    return cid
+
+    # 🔥 關鍵：轉安全ID
+    safe_id = hashlib.md5(cid.encode("utf-8")).hexdigest()[:12]
+
+    return safe_id
 
 
 def _split_url_and_instruction(text: str) -> tuple[Optional[str], Optional[str]]:
@@ -522,18 +575,23 @@ async def upload_pdf(
 
         # === 8) collectionId 驗證與索引重建 ===
         # 這裡再定義一個區域版的 _norm_collection_id（與全域的幾乎一樣）
-        def _norm_collection_id(cid: str | None) -> str:
-            INVALID_VALUES = {"", "string", "null", "undefined", "none"}
-            if cid is None or cid.strip().lower() in INVALID_VALUES:
-                # 若沒指定，就用 "_default" 當預設 collection
-                return "_default"
-            cid = cid.strip()
-            import re
-            if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", cid):
-                raise HTTPException(status_code=400, detail="非法的 collectionId")
-            return cid
+        # def _norm_collection_id(cid: str | None) -> str:
+        #     INVALID_VALUES = {"", "string", "null", "undefined", "none"}
+        #     if cid is None or cid.strip().lower() in INVALID_VALUES:
+        #         # 若沒指定，就用 "_default" 當預設 collection
+        #         return "_default"
+        #     cid = cid.strip()
+        #     import re
+        #     if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", cid):
+        #         raise HTTPException(status_code=400, detail="非法的 collectionId")
+            # return cid
 
-        cid = _norm_collection_id(collectionId)
+        # cid = _norm_collection_id(collectionId)
+        if not collectionId:
+            cid = "_default"
+        else:
+            cid = get_or_create_cid(collectionId)
+        
 
         # 模式選擇：
         # - overwrite：整個 collection 重新建立（清空舊內容）
@@ -645,7 +703,16 @@ async def ask_question(
         collectionId = _clean_str(collectionId)
 
         # collection 處理：如果是空字串/null 就變成 None（交給 qna 內部決定預設）
-        cid = _norm_collection_id(collectionId)
+        # cid = _norm_collection_id(collectionId)
+        if not collectionId:
+            cid = "_default"
+        else:
+            m = load_map()
+            cid = m.get(collectionId)
+
+            if cid is None:
+                raise HTTPException(status_code=400, detail="collection 不存在")
+        
         # sources：過濾掉空字串
         sources = [s for s in (source or []) if s] or None
         pure_text: Optional[str] = None

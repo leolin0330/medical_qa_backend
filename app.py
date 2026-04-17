@@ -702,16 +702,39 @@ async def ask_question(
         instruction = _clean_str(instruction)
         collectionId = _clean_str(collectionId)
 
+        # 舊邏輯先保留：
         # collection 處理：如果是空字串/null 就變成 None（交給 qna 內部決定預設）
         # cid = _norm_collection_id(collectionId)
-        if not collectionId:
-            cid = "_default"
-        else:
-            m = load_map()
-            cid = m.get(collectionId)
-
-            if cid is None:
-                raise HTTPException(status_code=400, detail="collection 不存在")
+        # if not collectionId:
+        #     cid = "_default"
+        # else:
+        #     m = load_map()
+        #     cid = m.get(collectionId)
+        #
+        #     if cid is None:
+        #         raise HTTPException(status_code=400, detail="collection 不存在")
+        #
+        # 問題：
+        # 上面會把「沒帶 collectionId」也強制設成 "_default"，
+        # 後面 mode 又用 (sources or cid) 判斷，導致純文字一般問答被誤送進 doc 模式。
+        cid: Optional[str] = None
+        if collectionId:
+            # 舊邏輯先保留：
+            # m = load_map()
+            # cid = m.get(collectionId)
+            #
+            # if cid is None:
+            #     raise HTTPException(status_code=400, detail="collection 不存在")
+            #
+            # 新邏輯：
+            # - "_default" 直接當成預設 collection
+            # - 先嘗試把 collectionId 當成前端送來的原始名稱去 map
+            # - map 不到時，再接受前端已保存的實際 cid 直接使用
+            if collectionId == "_default":
+                cid = "_default"
+            else:
+                m = load_map()
+                cid = m.get(collectionId) or collectionId
         
         # sources：過濾掉空字串
         sources = [s for s in (source or []) if s] or None
@@ -752,12 +775,20 @@ async def ask_question(
             )
 
         # --- 純文字情境：走一般問答（可以搭配 collection + sources） ---
+        # 舊邏輯先保留：
+        # mode="doc" if (sources or cid) else "general"
+        #
+        # 新邏輯：
+        # 只有真的有 sources，或使用者明確提供且解析成功的 collectionId，
+        # 才走 doc；否則走 general。
+        mode_to_use = "doc" if (sources or cid is not None) else "general"
+
         answer, mode_used, meta = qna.answer_question(
             query=pure_text,
             top_k=top_k,
             # 若有指定 sources 或 cid，就用 doc 模式（從向量庫檢索）
             # 否則用 general 模式（純 LLM 一般知識）
-            mode="doc" if (sources or cid) else "general",
+            mode=mode_to_use,
             sources=sources,
             collection_id=cid,
         )
@@ -780,8 +811,13 @@ async def ask_question(
     except HTTPException:
         raise
     except Exception as e:
-        # 其他錯誤（例如 qna 內部錯誤），先簡單轉成字串
-        raise HTTPException(status_code=500, detail=str(e))
+        # 舊邏輯先保留：
+        # raise HTTPException(status_code=500, detail=str(e))
+        #
+        # str(e) 有時是空字串，前端只會看到 {"detail": ""}。
+        # 這裡至少保留例外型別，方便先判讀是哪一類錯誤。
+        err_msg = str(e).strip() or type(e).__name__
+        raise HTTPException(status_code=500, detail=err_msg)
 
 
     # .\.venv\Scripts\Activate.ps1           
